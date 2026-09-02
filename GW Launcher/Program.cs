@@ -170,6 +170,15 @@ internal static class Program
                 return ex.Message;
             }
 
+            if (Settings.CheckForUpdates && Settings.AutoUpdatePlugins)
+            {
+                // Refresh third-party GWToolbox plugins before the client starts so the toolbox
+                // loads the current build. Network calls inside are time-boxed; a failure here
+                // must never break a launch.
+                try { CheckThirdPartyPluginUpdates(account).GetAwaiter().GetResult(); }
+                catch { /* plugin refresh must never block a launch */ }
+            }
+
             var res = MulticlientPatch.LaunchClient(account, ctrlHeld, out memory);
             if (res != null)
                 return res;
@@ -488,7 +497,7 @@ internal static class Program
             try { File.Delete(newPath); } catch { /* best effort */ }
         }
 
-        var releases = await GitHubAssets.GetReleasesAsync("gwdevhub", "gwlauncher");
+        var releases = await GitHubAssets.GetReleasesAsync("ejbraun", "gwlauncher");
 
         if (!releases.Any(r => !r.Prerelease && !r.Draft))
         {
@@ -809,6 +818,161 @@ internal static class Program
         await using var fs = new FileStream(gmod, FileMode.Create);
         await s.CopyToAsync(fs);
     }
+
+    // Keeps this account's third-party GWToolbox plugin DLLs current, called just before the
+    // client launches so the toolbox loads the fresh build. We don't assume where GWToolbox
+    // lives: we look for it among the account's enabled mod DLLs, and its plugins are expected
+    // under <GWToolbox.dll folder>\<machine name>\plugins (GWToolbox's own per-machine layout,
+    // rooted wherever the launcher's copy of the DLL actually sits). The fork's CI publishes
+    // each plugin's DLL plus a <name>.version.json sidecar to the rolling "plugins-latest"
+    // release; for every local DLL whose sha256 no longer matches its sidecar we list it in a
+    // confirmation prompt and, if the user agrees, download and swap it in (verified again by
+    // hash before the swap).
+    private static async Task CheckThirdPartyPluginUpdates(Account account)
+    {
+        const string owner = "ejbraun";
+        const string repo = "GWToolboxpp";
+        const string tag = "plugins-latest";
+
+        static bool IsGwToolbox(string path)
+        {
+            var file = Path.GetFileName(path);
+            return file.Equals("GWToolbox.dll", StringComparison.OrdinalIgnoreCase)
+                || file.Equals("GWToolboxdll.dll", StringComparison.OrdinalIgnoreCase);
+        }
+
+        var pluginDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dllMods = account.mods
+            .Where(m => m.active && m.type == ModType.kModTypeDLL)
+            .Select(m => m.fileName)
+            .Concat(ModManager.GetPluginFolderMods(account)
+                .Where(p => p.type == ModType.kModTypeDLL)
+                .Select(p => p.filePath));
+
+        foreach (var dllMod in dllMods)
+        {
+            if (!IsGwToolbox(dllMod))
+            {
+                continue;
+            }
+
+            var dir = Path.GetDirectoryName(dllMod);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                pluginDirs.Add(Path.Combine(dir, Environment.MachineName, "plugins"));
+            }
+        }
+
+        if (pluginDirs.Count == 0)
+        {
+            return;
+        }
+
+        // Time-box the release lookup so a dead network can't stall the launch.
+        var releasesTask = GitHubAssets.GetReleasesAsync(owner, repo);
+        if (await Task.WhenAny(releasesTask, Task.Delay(TimeSpan.FromSeconds(15))) != releasesTask)
+        {
+            return;
+        }
+
+        var release = (await releasesTask).FirstOrDefault(r => r.TagName == tag);
+        if (release == null)
+        {
+            return;
+        }
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("GWLauncher");
+
+        // First pass: work out which plugins are actually stale, without touching anything.
+        var outdated = new List<(string dll, GitHubAsset asset, string sha256)>();
+        var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pluginsDir in pluginDirs)
+        {
+            if (!Directory.Exists(pluginsDir))
+            {
+                continue;
+            }
+
+            foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
+            {
+                if (!processed.Add(Path.GetFullPath(dll)))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var name = Path.GetFileNameWithoutExtension(dll);
+                    var manifestAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.version.json");
+                    var dllAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.dll");
+                    if (manifestAsset == null || dllAsset == null)
+                    {
+                        continue;
+                    }
+
+                    var manifestJson = await http.GetStringAsync(manifestAsset.DownloadUrl);
+                    var remoteSha = (string?)Newtonsoft.Json.Linq.JObject.Parse(manifestJson)["sha256"];
+                    if (string.IsNullOrWhiteSpace(remoteSha))
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(GitHubAssets.ComputeSha256(dll), remoteSha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        outdated.Add((dll, dllAsset, remoteSha));
+                    }
+                }
+                catch (Exception)
+                {
+                    // A network blip or a malformed manifest shouldn't abort the rest.
+                }
+            }
+        }
+
+        if (outdated.Count == 0)
+        {
+            return;
+        }
+
+        var list = string.Join("\n", outdated.Select(o => "  • " + Path.GetFileName(o.dll)));
+        var choice = MessageBox.Show(
+            $"These GWToolbox plugins are out of date:\n\n{list}\n\nDownload and update them now?",
+            @"GW Launcher - Plugin updates",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+        if (choice != DialogResult.Yes)
+        {
+            return;
+        }
+
+        // Second pass: download the ones the user approved, verifying each against its manifest.
+        foreach (var (dll, asset, remoteSha) in outdated)
+        {
+            try
+            {
+                var temp = dll + ".new";
+                await using (var s = await http.GetStreamAsync(asset.DownloadUrl))
+                await using (var fs = new FileStream(temp, FileMode.Create))
+                {
+                    await s.CopyToAsync(fs);
+                }
+
+                if (!string.Equals(GitHubAssets.ComputeSha256(temp), remoteSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(temp);
+                    continue;
+                }
+
+                File.Move(temp, dll, true);
+            }
+            catch (Exception)
+            {
+                // A locked DLL (client already running) or a network blip: leave it, retry next launch.
+            }
+        }
+    }
+
     public static async Task CheckForGwExeUpdates(bool messageIfUpToDate, bool showCheckingDialog)
     {
         List<Account> accsToUpdate = new();

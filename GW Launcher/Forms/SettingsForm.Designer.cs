@@ -36,6 +36,7 @@
 			this.checkBoxShowPassword = new System.Windows.Forms.CheckBox();
 			this.groupBoxUpdates = new System.Windows.Forms.GroupBox();
 			this.checkBoxAutoUpdate = new System.Windows.Forms.CheckBox();
+			this.checkBoxAutoUpdatePlugins = new System.Windows.Forms.CheckBox();
 			this.checkBoxCheckForUpdates = new System.Windows.Forms.CheckBox();
 			this.groupBoxAdvanced = new System.Windows.Forms.GroupBox();
 			this.numericUpDownTimeout = new System.Windows.Forms.NumericUpDown();
@@ -113,10 +114,11 @@
 			// groupBoxUpdates
 			//
 			this.groupBoxUpdates.Controls.Add(this.checkBoxAutoUpdate);
+			this.groupBoxUpdates.Controls.Add(this.checkBoxAutoUpdatePlugins);
 			this.groupBoxUpdates.Controls.Add(this.checkBoxCheckForUpdates);
 			this.groupBoxUpdates.Location = new System.Drawing.Point(12, 128);
 			this.groupBoxUpdates.Name = "groupBoxUpdates";
-			this.groupBoxUpdates.Size = new System.Drawing.Size(360, 80);
+			this.groupBoxUpdates.Size = new System.Drawing.Size(360, 104);
 			this.groupBoxUpdates.TabIndex = 1;
 			this.groupBoxUpdates.TabStop = false;
 			this.groupBoxUpdates.Text = "Updates";
@@ -130,9 +132,19 @@
 			this.checkBoxAutoUpdate.TabIndex = 1;
 			this.checkBoxAutoUpdate.Text = "Auto update";
 			this.checkBoxAutoUpdate.UseVisualStyleBackColor = true;
-			// 
+			//
+			// checkBoxAutoUpdatePlugins
+			//
+			this.checkBoxAutoUpdatePlugins.AutoSize = true;
+			this.checkBoxAutoUpdatePlugins.Location = new System.Drawing.Point(15, 74);
+			this.checkBoxAutoUpdatePlugins.Name = "checkBoxAutoUpdatePlugins";
+			this.checkBoxAutoUpdatePlugins.Size = new System.Drawing.Size(184, 19);
+			this.checkBoxAutoUpdatePlugins.TabIndex = 2;
+			this.checkBoxAutoUpdatePlugins.Text = "Auto-update GWToolbox plugins";
+			this.checkBoxAutoUpdatePlugins.UseVisualStyleBackColor = true;
+			//
 			// checkBoxCheckForUpdates
-			// 
+			//
 			this.checkBoxCheckForUpdates.AutoSize = true;
 			this.checkBoxCheckForUpdates.Location = new System.Drawing.Point(15, 22);
 			this.checkBoxCheckForUpdates.Name = "checkBoxCheckForUpdates";
@@ -146,7 +158,7 @@
 			// 
 			this.groupBoxAdvanced.Controls.Add(this.numericUpDownTimeout);
 			this.groupBoxAdvanced.Controls.Add(this.labelTimeout);
-			this.groupBoxAdvanced.Location = new System.Drawing.Point(12, 214);
+			this.groupBoxAdvanced.Location = new System.Drawing.Point(12, 238);
 			this.groupBoxAdvanced.Name = "groupBoxAdvanced";
 			this.groupBoxAdvanced.Size = new System.Drawing.Size(360, 60);
 			this.groupBoxAdvanced.TabIndex = 2;
@@ -186,7 +198,7 @@
 			// 
 			// buttonOK
 			// 
-			this.buttonOK.Location = new System.Drawing.Point(216, 290);
+			this.buttonOK.Location = new System.Drawing.Point(216, 314);
 			this.buttonOK.Name = "buttonOK";
 			this.buttonOK.Size = new System.Drawing.Size(75, 28);
 			this.buttonOK.TabIndex = 3;
@@ -196,7 +208,7 @@
 			// 
 			// buttonCancel
 			// 
-			this.buttonCancel.Location = new System.Drawing.Point(297, 290);
+			this.buttonCancel.Location = new System.Drawing.Point(297, 314);
 			this.buttonCancel.Name = "buttonCancel";
 			this.buttonCancel.Size = new System.Drawing.Size(75, 28);
 			this.buttonCancel.TabIndex = 4;
@@ -208,7 +220,7 @@
 			// 
 			this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-			this.ClientSize = new System.Drawing.Size(384, 330);
+			this.ClientSize = new System.Drawing.Size(384, 354);
 			this.Controls.Add(this.buttonCancel);
 			this.Controls.Add(this.buttonOK);
 			this.Controls.Add(this.groupBoxAdvanced);
@@ -241,6 +253,7 @@
 		private System.Windows.Forms.CheckBox checkBoxShowPassword;
 		private System.Windows.Forms.GroupBox groupBoxUpdates;
 		private System.Windows.Forms.CheckBox checkBoxAutoUpdate;
+		private System.Windows.Forms.CheckBox checkBoxAutoUpdatePlugins;
 		private System.Windows.Forms.CheckBox checkBoxCheckForUpdates;
 		private System.Windows.Forms.GroupBox groupBoxAdvanced;
 		private System.Windows.Forms.NumericUpDown numericUpDownTimeout;
