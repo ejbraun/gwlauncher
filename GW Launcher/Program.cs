@@ -173,8 +173,9 @@ internal static class Program
             if (Settings.CheckForUpdates && Settings.AutoUpdatePlugins)
             {
                 // Refresh third-party GWToolbox plugins before the client starts so the toolbox
-                // loads the current build. Never let it hold up (or break) a launch.
-                try { CheckThirdPartyPluginUpdates(account).Wait(TimeSpan.FromSeconds(20)); }
+                // loads the current build. Network calls inside are time-boxed; a failure here
+                // must never break a launch.
+                try { CheckThirdPartyPluginUpdates(account).GetAwaiter().GetResult(); }
                 catch { /* plugin refresh must never block a launch */ }
             }
 
@@ -824,8 +825,9 @@ internal static class Program
     // under <GWToolbox.dll folder>\<machine name>\plugins (GWToolbox's own per-machine layout,
     // rooted wherever the launcher's copy of the DLL actually sits). The fork's CI publishes
     // each plugin's DLL plus a <name>.version.json sidecar to the rolling "plugins-latest"
-    // release; for every local DLL that has a matching sidecar we compare sha256 and overwrite
-    // on drift.
+    // release; for every local DLL whose sha256 no longer matches its sidecar we list it in a
+    // confirmation prompt and, if the user agrees, download and swap it in (verified again by
+    // hash before the swap).
     private static async Task CheckThirdPartyPluginUpdates(Account account)
     {
         const string owner = "ejbraun";
@@ -866,16 +868,24 @@ internal static class Program
             return;
         }
 
-        var releases = await GitHubAssets.GetReleasesAsync(owner, repo);
-        var release = releases.FirstOrDefault(r => r.TagName == tag);
+        // Time-box the release lookup so a dead network can't stall the launch.
+        var releasesTask = GitHubAssets.GetReleasesAsync(owner, repo);
+        if (await Task.WhenAny(releasesTask, Task.Delay(TimeSpan.FromSeconds(15))) != releasesTask)
+        {
+            return;
+        }
+
+        var release = (await releasesTask).FirstOrDefault(r => r.TagName == tag);
         if (release == null)
         {
             return;
         }
 
-        using var http = new HttpClient();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("GWLauncher");
 
+        // First pass: work out which plugins are actually stale, without touching anything.
+        var outdated = new List<(string dll, GitHubAsset asset, string sha256)>();
         var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var pluginsDir in pluginDirs)
         {
@@ -908,31 +918,57 @@ internal static class Program
                         continue;
                     }
 
-                    if (string.Equals(GitHubAssets.ComputeSha256(dll), remoteSha, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(GitHubAssets.ComputeSha256(dll), remoteSha, StringComparison.OrdinalIgnoreCase))
                     {
-                        continue;
+                        outdated.Add((dll, dllAsset, remoteSha));
                     }
-
-                    var temp = dll + ".new";
-                    await using (var s = await http.GetStreamAsync(dllAsset.DownloadUrl))
-                    await using (var fs = new FileStream(temp, FileMode.Create))
-                    {
-                        await s.CopyToAsync(fs);
-                    }
-
-                    if (!string.Equals(GitHubAssets.ComputeSha256(temp), remoteSha, StringComparison.OrdinalIgnoreCase))
-                    {
-                        File.Delete(temp);
-                        continue;
-                    }
-
-                    File.Move(temp, dll, true);
                 }
                 catch (Exception)
                 {
-                    // A locked DLL (client already running), a network blip, or a malformed manifest
-                    // should not abort the other plugins; the check retries on the next launch.
+                    // A network blip or a malformed manifest shouldn't abort the rest.
                 }
+            }
+        }
+
+        if (outdated.Count == 0)
+        {
+            return;
+        }
+
+        var list = string.Join("\n", outdated.Select(o => "  • " + Path.GetFileName(o.dll)));
+        var choice = MessageBox.Show(
+            $"These GWToolbox plugins are out of date:\n\n{list}\n\nDownload and update them now?",
+            @"GW Launcher - Plugin updates",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+        if (choice != DialogResult.Yes)
+        {
+            return;
+        }
+
+        // Second pass: download the ones the user approved, verifying each against its manifest.
+        foreach (var (dll, asset, remoteSha) in outdated)
+        {
+            try
+            {
+                var temp = dll + ".new";
+                await using (var s = await http.GetStreamAsync(asset.DownloadUrl))
+                await using (var fs = new FileStream(temp, FileMode.Create))
+                {
+                    await s.CopyToAsync(fs);
+                }
+
+                if (!string.Equals(GitHubAssets.ComputeSha256(temp), remoteSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(temp);
+                    continue;
+                }
+
+                File.Move(temp, dll, true);
+            }
+            catch (Exception)
+            {
+                // A locked DLL (client already running) or a network blip: leave it, retry next launch.
             }
         }
     }
