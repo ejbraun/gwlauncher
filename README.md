@@ -99,7 +99,7 @@ There are three settings that you can change in the file Settings.json (open wit
 *	Encrypt: bool, if GW Launcher will ask you for a password and encrypt your account info.
 *	CheckForUpdates: bool, if GW Launcher should check for new releases, default true
 *	AutoUpdate: bool, if GW Launcher should automatically update, default false
-*	AutoUpdatePlugins: bool, if GW Launcher should refresh third-party GWToolbox plugin DLLs from the `plugins-latest` build on each launch, when GWToolbox is an enabled mod DLL, looking in `<GWToolbox.dll folder>\<computer name>\plugins` (requires CheckForUpdates), default false
+*	AutoUpdatePlugins: bool, if GW Launcher should refresh third-party GWToolbox plugin DLLs from the `plugins-latest` build when launching an account whose enabled mods include GWToolbox, looking in `<GWToolbox.dll folder>\<computer name>\plugins` (requires CheckForUpdates), default false
 *	LaunchMinimized: bool, if GW Launcher should launch minimized, default false
 
 * * *

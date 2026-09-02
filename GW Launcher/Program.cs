@@ -170,6 +170,14 @@ internal static class Program
                 return ex.Message;
             }
 
+            if (Settings.CheckForUpdates && Settings.AutoUpdatePlugins)
+            {
+                // Refresh third-party GWToolbox plugins before the client starts so the toolbox
+                // loads the current build. Never let it hold up (or break) a launch.
+                try { CheckThirdPartyPluginUpdates(account).Wait(TimeSpan.FromSeconds(20)); }
+                catch { /* plugin refresh must never block a launch */ }
+            }
+
             var res = MulticlientPatch.LaunchClient(account, ctrlHeld, out memory);
             if (res != null)
                 return res;
@@ -293,11 +301,6 @@ internal static class Program
         {
             Exit();
             return; // Error message already displayed
-        }
-
-        if (Settings.CheckForUpdates && Settings.AutoUpdatePlugins)
-        {
-            Task.Run(CheckThirdPartyPluginUpdates);
         }
 
         _mainThreadRunning = true;
@@ -493,7 +496,7 @@ internal static class Program
             try { File.Delete(newPath); } catch { /* best effort */ }
         }
 
-        var releases = await GitHubAssets.GetReleasesAsync("gwdevhub", "gwlauncher");
+        var releases = await GitHubAssets.GetReleasesAsync("ejbraun", "gwlauncher");
 
         if (!releases.Any(r => !r.Prerelease && !r.Draft))
         {
@@ -815,13 +818,15 @@ internal static class Program
         await s.CopyToAsync(fs);
     }
 
-    // Keeps third-party GWToolbox plugin DLLs current. We don't assume where GWToolbox lives:
-    // we look for it among the enabled mod DLLs, and its plugins are expected under
-    // <GWToolbox.dll folder>\<machine name>\plugins (GWToolbox's own per-machine layout, rooted
-    // wherever the launcher's copy of the DLL actually sits). The fork's CI publishes each
-    // plugin's DLL plus a <name>.version.json sidecar to the rolling "plugins-latest" release;
-    // for every local DLL that has a matching sidecar we compare sha256 and overwrite on drift.
-    private static async Task CheckThirdPartyPluginUpdates()
+    // Keeps this account's third-party GWToolbox plugin DLLs current, called just before the
+    // client launches so the toolbox loads the fresh build. We don't assume where GWToolbox
+    // lives: we look for it among the account's enabled mod DLLs, and its plugins are expected
+    // under <GWToolbox.dll folder>\<machine name>\plugins (GWToolbox's own per-machine layout,
+    // rooted wherever the launcher's copy of the DLL actually sits). The fork's CI publishes
+    // each plugin's DLL plus a <name>.version.json sidecar to the rolling "plugins-latest"
+    // release; for every local DLL that has a matching sidecar we compare sha256 and overwrite
+    // on drift.
+    private static async Task CheckThirdPartyPluginUpdates(Account account)
     {
         const string owner = "ejbraun";
         const string repo = "GWToolboxpp";
@@ -835,27 +840,24 @@ internal static class Program
         }
 
         var pluginDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var account in Accounts)
+        var dllMods = account.mods
+            .Where(m => m.active && m.type == ModType.kModTypeDLL)
+            .Select(m => m.fileName)
+            .Concat(ModManager.GetPluginFolderMods(account)
+                .Where(p => p.type == ModType.kModTypeDLL)
+                .Select(p => p.filePath));
+
+        foreach (var dllMod in dllMods)
         {
-            var dllMods = account.mods
-                .Where(m => m.active && m.type == ModType.kModTypeDLL)
-                .Select(m => m.fileName)
-                .Concat(ModManager.GetPluginFolderMods(account)
-                    .Where(p => p.type == ModType.kModTypeDLL)
-                    .Select(p => p.filePath));
-
-            foreach (var dllMod in dllMods)
+            if (!IsGwToolbox(dllMod))
             {
-                if (!IsGwToolbox(dllMod))
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                var dir = Path.GetDirectoryName(dllMod);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    pluginDirs.Add(Path.Combine(dir, Environment.MachineName, "plugins"));
-                }
+            var dir = Path.GetDirectoryName(dllMod);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                pluginDirs.Add(Path.Combine(dir, Environment.MachineName, "plugins"));
             }
         }
 
