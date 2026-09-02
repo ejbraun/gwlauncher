@@ -264,11 +264,6 @@ internal static class Program
             Task.Run(CheckGitHubNewerVersion);
             Task.Run(CheckGitHubGModVersion);
             Task.Run(async () => await CheckForGwExeUpdates(false, false));
-
-            if (Settings.AutoUpdatePlugins)
-            {
-                Task.Run(CheckThirdPartyPluginUpdates);
-            }
         }
 
         Settings.Save();
@@ -298,6 +293,11 @@ internal static class Program
         {
             Exit();
             return; // Error message already displayed
+        }
+
+        if (Settings.CheckForUpdates && Settings.AutoUpdatePlugins)
+        {
+            Task.Run(CheckThirdPartyPluginUpdates);
         }
 
         _mainThreadRunning = true;
@@ -815,26 +815,51 @@ internal static class Program
         await s.CopyToAsync(fs);
     }
 
-    // Keeps third-party GWToolbox plugin DLLs current. GWToolbox loads plugins from
-    // <My Documents>\GWToolboxpp\<machine name>\plugins; the fork's CI publishes each plugin's
-    // DLL plus a <name>.version.json sidecar to the rolling "plugins-latest" release. For every
-    // local DLL that has a matching sidecar we compare sha256 and overwrite when it differs.
+    // Keeps third-party GWToolbox plugin DLLs current. We don't assume where GWToolbox lives:
+    // we look for it among the enabled mod DLLs, and its plugins are expected under
+    // <GWToolbox.dll folder>\<machine name>\plugins (GWToolbox's own per-machine layout, rooted
+    // wherever the launcher's copy of the DLL actually sits). The fork's CI publishes each
+    // plugin's DLL plus a <name>.version.json sidecar to the rolling "plugins-latest" release;
+    // for every local DLL that has a matching sidecar we compare sha256 and overwrite on drift.
     private static async Task CheckThirdPartyPluginUpdates()
     {
         const string owner = "ejbraun";
         const string repo = "GWToolboxpp";
         const string tag = "plugins-latest";
 
-        var pluginsDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "GWToolboxpp", Environment.MachineName, "plugins");
-        if (!Directory.Exists(pluginsDir))
+        static bool IsGwToolbox(string path)
         {
-            return;
+            var file = Path.GetFileName(path);
+            return file.Equals("GWToolbox.dll", StringComparison.OrdinalIgnoreCase)
+                || file.Equals("GWToolboxdll.dll", StringComparison.OrdinalIgnoreCase);
         }
 
-        var localDlls = Directory.GetFiles(pluginsDir, "*.dll");
-        if (localDlls.Length == 0)
+        var pluginDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var account in Accounts)
+        {
+            var dllMods = account.mods
+                .Where(m => m.active && m.type == ModType.kModTypeDLL)
+                .Select(m => m.fileName)
+                .Concat(ModManager.GetPluginFolderMods(account)
+                    .Where(p => p.type == ModType.kModTypeDLL)
+                    .Select(p => p.filePath));
+
+            foreach (var dllMod in dllMods)
+            {
+                if (!IsGwToolbox(dllMod))
+                {
+                    continue;
+                }
+
+                var dir = Path.GetDirectoryName(dllMod);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    pluginDirs.Add(Path.Combine(dir, Environment.MachineName, "plugins"));
+                }
+            }
+        }
+
+        if (pluginDirs.Count == 0)
         {
             return;
         }
@@ -849,49 +874,63 @@ internal static class Program
         using var http = new HttpClient();
         http.DefaultRequestHeaders.UserAgent.ParseAdd("GWLauncher");
 
-        foreach (var dll in localDlls)
+        var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pluginsDir in pluginDirs)
         {
-            try
+            if (!Directory.Exists(pluginsDir))
             {
-                var name = Path.GetFileNameWithoutExtension(dll);
-                var manifestAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.version.json");
-                var dllAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.dll");
-                if (manifestAsset == null || dllAsset == null)
-                {
-                    continue;
-                }
-
-                var manifestJson = await http.GetStringAsync(manifestAsset.DownloadUrl);
-                var remoteSha = (string?)Newtonsoft.Json.Linq.JObject.Parse(manifestJson)["sha256"];
-                if (string.IsNullOrWhiteSpace(remoteSha))
-                {
-                    continue;
-                }
-
-                if (string.Equals(GitHubAssets.ComputeSha256(dll), remoteSha, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var temp = dll + ".new";
-                await using (var s = await http.GetStreamAsync(dllAsset.DownloadUrl))
-                await using (var fs = new FileStream(temp, FileMode.Create))
-                {
-                    await s.CopyToAsync(fs);
-                }
-
-                if (!string.Equals(GitHubAssets.ComputeSha256(temp), remoteSha, StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Delete(temp);
-                    continue;
-                }
-
-                File.Move(temp, dll, true);
+                continue;
             }
-            catch (Exception)
+
+            foreach (var dll in Directory.GetFiles(pluginsDir, "*.dll"))
             {
-                // A locked DLL (client already running), a network blip, or a malformed manifest
-                // should not abort the other plugins; the check retries on the next launch.
+                if (!processed.Add(Path.GetFullPath(dll)))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var name = Path.GetFileNameWithoutExtension(dll);
+                    var manifestAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.version.json");
+                    var dllAsset = release.Assets.FirstOrDefault(a => a.Name == $"{name}.dll");
+                    if (manifestAsset == null || dllAsset == null)
+                    {
+                        continue;
+                    }
+
+                    var manifestJson = await http.GetStringAsync(manifestAsset.DownloadUrl);
+                    var remoteSha = (string?)Newtonsoft.Json.Linq.JObject.Parse(manifestJson)["sha256"];
+                    if (string.IsNullOrWhiteSpace(remoteSha))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(GitHubAssets.ComputeSha256(dll), remoteSha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var temp = dll + ".new";
+                    await using (var s = await http.GetStreamAsync(dllAsset.DownloadUrl))
+                    await using (var fs = new FileStream(temp, FileMode.Create))
+                    {
+                        await s.CopyToAsync(fs);
+                    }
+
+                    if (!string.Equals(GitHubAssets.ComputeSha256(temp), remoteSha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Delete(temp);
+                        continue;
+                    }
+
+                    File.Move(temp, dll, true);
+                }
+                catch (Exception)
+                {
+                    // A locked DLL (client already running), a network blip, or a malformed manifest
+                    // should not abort the other plugins; the check retries on the next launch.
+                }
             }
         }
     }

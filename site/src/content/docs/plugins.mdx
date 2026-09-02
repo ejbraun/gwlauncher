@@ -45,12 +45,13 @@ The file appears under the **DLLs** group in the Mod Manager.
 
 ## Keep GWToolbox plugins up to date
 
-GWToolbox has its own plugin system that loads DLLs from
-`Documents\GWToolboxpp\<computer name>\plugins` (for example the SCTracker plugin). Tick
-**Auto-update GWToolbox plugins** in [Settings](/docs/settings/) and, on every launch, GW
-Launcher checks each `.dll` in that folder against GWToolbox's `plugins-latest` build and
-replaces any whose published SHA-256 no longer matches. Files with no matching published
-manifest are left untouched. The option requires **Check for updates** to be on.
+GWToolbox has its own plugin system that loads DLLs (for example the SCTracker plugin) from a
+`<computer name>\plugins` folder next to its DLL. Tick **Auto-update GWToolbox plugins** in
+[Settings](/docs/settings/) and, on every launch, if GWToolbox is one of your enabled mod
+DLLs, GW Launcher checks each `.dll` in `<GWToolbox.dll folder>\<computer name>\plugins`
+against GWToolbox's `plugins-latest` build and replaces any whose published SHA-256 no longer
+matches. Files with no matching published manifest are left untouched. The option requires
+**Check for updates** to be on.
 
 ## Notes
 
