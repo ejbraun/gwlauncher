@@ -6,6 +6,9 @@ public class GlobalSettings
 
     public bool AutoUpdate { get; set; } = false;
 
+    // Refresh third-party GWToolbox plugin DLLs from the plugins-latest release on each launch.
+    public bool AutoUpdatePlugins { get; set; } = false;
+
     public bool LaunchMinimized { get; set; } = false;
 
     public uint TimeoutOnModlaunch { get; set; } = 5000;

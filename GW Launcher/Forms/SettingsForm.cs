@@ -18,17 +18,20 @@ public partial class SettingsForm : Form
 		textBoxPassword.Text = Program.Accounts.CurrentPassword;
 		checkBoxCheckForUpdates.Checked = _settings.CheckForUpdates;
 		checkBoxAutoUpdate.Checked = _settings.AutoUpdate;
+		checkBoxAutoUpdatePlugins.Checked = _settings.AutoUpdatePlugins;
 		checkBoxLaunchMinimized.Checked = _settings.LaunchMinimized;
 		numericUpDownTimeout.Value = _settings.TimeoutOnModlaunch;
 
 		// Auto-update should only be enabled if check for updates is enabled
 		checkBoxAutoUpdate.Enabled = _settings.CheckForUpdates;
+		checkBoxAutoUpdatePlugins.Enabled = _settings.CheckForUpdates;
 	}
 
 	private void SaveSettings()
 	{
 		_settings.CheckForUpdates = checkBoxCheckForUpdates.Checked;
 		_settings.AutoUpdate = checkBoxAutoUpdate.Checked;
+		_settings.AutoUpdatePlugins = checkBoxAutoUpdatePlugins.Checked;
 		_settings.LaunchMinimized = checkBoxLaunchMinimized.Checked;
 		_settings.TimeoutOnModlaunch = (uint)numericUpDownTimeout.Value;
 
@@ -53,9 +56,11 @@ public partial class SettingsForm : Form
 	{
 		// Auto-update should only be available if check for updates is enabled
 		checkBoxAutoUpdate.Enabled = checkBoxCheckForUpdates.Checked;
+		checkBoxAutoUpdatePlugins.Enabled = checkBoxCheckForUpdates.Checked;
 		if (!checkBoxCheckForUpdates.Checked)
 		{
 			checkBoxAutoUpdate.Checked = false;
+			checkBoxAutoUpdatePlugins.Checked = false;
 		}
 	}
 
